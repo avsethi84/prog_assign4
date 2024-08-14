@@ -44,41 +44,39 @@ class StateActionFeatureVectorWithTile:
         # Clip state_tiles to ensure values are within valid ranges
         state_tiles = np.clip(state_tiles, 0, self.num_tiles.astype(int) - 1)
 
-        # Debugging statements
-        # print("State:", s)
-        # print("State Diff:", state_diff)
-        # print("Offsets:", offsets)
-        # print("State Tiles (before ravel):", state_tiles)
-        # print("Num Tiles:", self.num_tiles)
-
         try:
             ravel_indices = np.ravel_multi_index(state_tiles.T, self.num_tiles.astype(int))
-            # print("Ravel Indices:", ravel_indices)
             return ravel_indices
         except ValueError as e:
             print("Error in ravel_multi_index:", e)
             raise
 
-
 def SarsaLambda(
     env,  # openai gym environment
-    gamma: float,
-    lam: float,
-    alpha: float,
+    gamma: float,  # discount factor
+    lam: float,  # decay rate
+    alpha: float,  # step size
     X: StateActionFeatureVectorWithTile,
     num_episode: int,
 ) -> np.array:
-    def epsilon_greedy_policy(s, done, w, epsilon=0.0):
+    """
+    Implement True online Sarsa(λ) based on the provided pseudocode.
+    """
+    def epsilon_greedy_policy(s, done, w, epsilon=0.2):  # Increase epsilon for more exploration
         nA = env.action_space.n
         Q = [np.dot(w, X(s, done, a)) for a in range(nA)]
         return np.argmax(Q) if np.random.rand() >= epsilon else np.random.randint(nA)
 
-    w = np.zeros(X.feature_vector_len())
+
+    w = np.random.randn(X.feature_vector_len()) * 0.01  # Initialize w with small random values
+
 
     for episode in range(num_episode):
         s = env.reset()
+        G = 0  # Initialize total reward for this episode
         done = False
         a = epsilon_greedy_policy(s, done, w)
+        x = X(s, done, a)
         z = np.zeros(X.feature_vector_len())
         Q_old = 0
 
@@ -91,14 +89,27 @@ def SarsaLambda(
                 truncated = False
 
             a_prime = epsilon_greedy_policy(s_prime, done, w)
-            delta = r + gamma * np.dot(w, X(s_prime, done, a_prime)) - np.dot(w, X(s, done, a))
-            z = gamma * lam * z + X(s, done, a)
-            w += alpha * (delta + np.dot(w, X(s, done, a)) - Q_old) * z - alpha * (np.dot(w, X(s, done, a)) - Q_old) * X(s, done, a)
-            Q_old = np.dot(w, X(s, done, a))
-            s = s_prime
+            x_prime = X(s_prime, done, a_prime)
+
+            Q = np.dot(w, x)
+            Q_prime = np.dot(w, x_prime)
+
+            delta = r + gamma * Q_prime - Q
+
+            z = gamma * lam * z + (1 - alpha * gamma * lam * np.dot(z, x)) * x
+            w += alpha * (delta + Q - Q_old) * z - alpha * (Q - Q_old) * x
+
+            Q_old = Q
+            x = x_prime
             a = a_prime
+            G += r
+
+            print(f"State: {s}, Action: {a}, Reward: {r}, Q-value: {Q}, Next Q-value: {Q_prime}, Total Reward: {G}")
 
             if done or truncated:
                 break
 
-    return w
+        print(f"Episode {episode}: Total Reward: {G}")
+
+
+        return w

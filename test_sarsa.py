@@ -11,10 +11,12 @@ def test_sarsa_lamda():
         env.observation_space.high,
         env.action_space.n,
         num_tilings=10,
-        tile_width=np.array([.45,.035])
+        tile_width=np.array([.451,.0351])
     )
 
-    w = SarsaLambda(env, gamma, 0.8, 0.01, X, 2000)
+   # w = SarsaLambda(env, gamma, 0.8, 0.01, X, 2000)
+    w = SarsaLambda(env, 0.99, 0.9, 0.01, X, 5000)
+
 
     def greedy_policy(s,done):
         Q = [np.dot(w, X(s,done,a)) for a in range(env.action_space.n)]
