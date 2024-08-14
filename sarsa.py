@@ -1,95 +1,95 @@
-# In this part, we implement the true online Sarsa() algorithm as described on page 307 of the textbook. Open `sarsa.py` and implement `SarsaLambda` method. Tile coding should be used as a feature extractor . To do so, you should fill in the parts indicated as 'TODO' in the `StateActionFeatureVectorWithTile` class.
-
-# Here are a few tips & specific details you need to be careful when implementing tile coding:
-
-# - Each tiling should cover the entire space completely so that every point is included by the same number of tilings.
-# - In order to achieve that, # tiles in each dimension should be: ceil[(high-low)/tile_width] + 1.
-# - Each tiling should start from (low - tiling_index / # tilings * tile width) where the tiling index starts from 0. With the starting offset, you can easily find out the corresponding tile for each tiling given the state.
-
-# Note: It's possible to have the wrong number of tilings in test_sarsa.py due to floating point errors that cause your implementation to use one tile more or less. If that happens, try slightly increasing the tile width specified in test_sarsa.py by changing line 15 to
-
-# tile_width=np.array([.451,.0351]))
-
-
 import numpy as np
 
-class StateActionFeatureVectorWithTile():
+class StateActionFeatureVectorWithTile:
     def __init__(self,
-                 state_low:np.array,
-                 state_high:np.array,
-                 num_actions:int,
-                 num_tilings:int,
-                 tile_width:np.array):
-        """
-        state_low: possible minimum value for each dimension in state
-        state_high: possible maimum value for each dimension in state
-        num_actions: the number of possible actions
-        num_tilings: # tilings
-        tile_width: tile width for each dimension
-        """
+                 state_low: np.array,
+                 state_high: np.array,
+                 num_actions: int,
+                 num_tilings: int,
+                 tile_width: np.array):
         self.state_low = state_low
         self.state_high = state_high
         self.num_actions = num_actions
         self.num_tilings = num_tilings
         self.tile_width = tile_width
         self.num_tiles = np.ceil((self.state_high - self.state_low) / self.tile_width) + 1
-        self.num_features = self.num_actions * self.num_tilings * np.prod(self.num_tiles)
-
+        self.num_features = int(self.num_actions * self.num_tilings * np.prod(self.num_tiles))
 
     def feature_vector_len(self) -> int:
-        """
-        return dimension of feature_vector: d = num_actions * num_tilings * num_tiles
-        """
         return self.num_features
-    
 
     def __call__(self, s, done, a) -> np.array:
-        """
-        implement function x: S+ x A -> [0,1]^d
-        if done is True, then return 0^d
-        """
         if done:
-            return np.zeros(X.feature_vector_len())
+            return np.zeros(self.feature_vector_len())
         else:
-            feature_vector = np.zeros(X.feature_vector_len())
-            state_tiles = get_state_tiles(s, X)
-            action_offset = a * X.num_tilings * np.prod(X.num_tiles)
+            feature_vector = np.zeros(self.feature_vector_len())
+            state_tiles = self.get_state_tiles(s)
+            action_offset = a * self.num_tilings * np.prod(self.num_tiles)
             for tile in state_tiles:
-                feature_vector[action_offset + tile] = 1
-            return feature_vector
+                feature_vector[int(action_offset + tile)] = 1
+            return feature_vector.flatten()
+
+    def get_state_tiles(self, s):
+        """
+        Calculate the tiles for the given state s across all tilings.
+        """
+        # Extract the state array from the tuple
+        s = s[0]
+        s = np.array(s)
+        state_diff = s - self.state_low
+        tiling_indices = np.arange(self.num_tilings)
+        offsets = (self.tile_width / self.num_tilings) * tiling_indices[:, np.newaxis]
+        state_tiles = np.floor((state_diff + offsets) / self.tile_width).astype(int)
+
+        # Clip state_tiles to ensure values are within valid ranges
+        state_tiles = np.clip(state_tiles, 0, self.num_tiles.astype(int) - 1)
+
+        # Debugging statements
+        # print("State:", s)
+        # print("State Diff:", state_diff)
+        # print("Offsets:", offsets)
+        # print("State Tiles (before ravel):", state_tiles)
+        # print("Num Tiles:", self.num_tiles)
+
+        try:
+            ravel_indices = np.ravel_multi_index(state_tiles.T, self.num_tiles.astype(int))
+            # print("Ravel Indices:", ravel_indices)
+            return ravel_indices
+        except ValueError as e:
+            print("Error in ravel_multi_index:", e)
+            raise
+
 
 def SarsaLambda(
-    env, # openai gym environment
-    gamma:float, # discount factor
-    lam:float, # decay rate
-    alpha:float, # step size
-    X:StateActionFeatureVectorWithTile,
-    num_episode:int,
+    env,  # openai gym environment
+    gamma: float,
+    lam: float,
+    alpha: float,
+    X: StateActionFeatureVectorWithTile,
+    num_episode: int,
 ) -> np.array:
-    """
-    Implement True online Sarsa(\lambda)
-    """
-
-    def epsilon_greedy_policy(s,done,w,epsilon=.0):
+    def epsilon_greedy_policy(s, done, w, epsilon=0.0):
         nA = env.action_space.n
-        Q = [np.dot(w, X(s,done,a)) for a in range(nA)]
+        Q = [np.dot(w, X(s, done, a)) for a in range(nA)]
+        return np.argmax(Q) if np.random.rand() >= epsilon else np.random.randint(nA)
 
-        if np.random.rand() < epsilon:
-            return np.random.randint(nA)
-        else:
-            return np.argmax(Q)
-
-    w = np.zeros((X.feature_vector_len()))
+    w = np.zeros(X.feature_vector_len())
 
     for episode in range(num_episode):
         s = env.reset()
         done = False
         a = epsilon_greedy_policy(s, done, w)
-        z = np.zeros((X.feature_vector_len()))
+        z = np.zeros(X.feature_vector_len())
         Q_old = 0
-        
+
         while not done:
-            s_prime, r, done, _ = env.step(a)
+            outcome = env.step(a)
+            if len(outcome) == 5:
+                s_prime, r, done, truncated, _ = outcome
+            else:
+                s_prime, r, done, _ = outcome
+                truncated = False
+
             a_prime = epsilon_greedy_policy(s_prime, done, w)
             delta = r + gamma * np.dot(w, X(s_prime, done, a_prime)) - np.dot(w, X(s, done, a))
             z = gamma * lam * z + X(s, done, a)
@@ -97,5 +97,8 @@ def SarsaLambda(
             Q_old = np.dot(w, X(s, done, a))
             s = s_prime
             a = a_prime
+
+            if done or truncated:
+                break
 
     return w
